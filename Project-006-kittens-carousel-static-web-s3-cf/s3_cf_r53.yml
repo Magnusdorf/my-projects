@@ -1,0 +1,97 @@
+AWSTemplateFormatVersion: 2010-09-09
+Description: |
+  Cloudformation Template for Pokemon carousel static website deploy on s3 through cloudfront and route 53
+
+Parameters:
+  DomainName:
+    Description: DNS Name of existing Amazon Route 53 hosted zone ex. clarusway.us
+    Type: AWS::Route53::HostedZone::Id
+  PokemonDomainName:
+    Description: Full domain name for the App. ex. vincenzo.clarusway.us
+    Type: String
+    AllowedPattern: (?!-)[a-zA-Z0-9-.]{1,63}(?<!-)  
+
+
+Resources:
+  PokemonBucket:
+    Type: AWS::S3::Bucket
+    Properties: 
+      AccessControl: PublicRead
+      BucketName: !Ref PokemonDomainName
+      WebsiteConfiguration: 
+        IndexDocument: index.html
+
+  PokemonBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref PokemonBucket
+      PolicyDocument:     
+        Statement:
+          - Sid: PublicReadforStaticWebsite
+            Effect: Allow
+            Principal: '*'
+            Action: s3:GetObject
+            Resource: !Join ['', ['arn:aws:s3:::', !Ref 'PokemonBucket', /*]]
+
+  PokemonCertificate:
+    Type: AWS::CertificateManager::Certificate
+    Properties:
+      CertificateTransparencyLoggingPreference: ENABLED
+      DomainName: !Ref PokemonDomainName
+      DomainValidationOptions:
+        - DomainName: !Ref PokemonDomainName
+          HostedZoneId: !Ref DomainName
+      ValidationMethod: DNS
+
+  PokemonCloudfront:
+    Type: AWS::CloudFront::Distribution
+    Properties:
+      DistributionConfig:
+        Aliases:
+        - !Ref PokemonDomainName
+        Comment: Cloudfront Distribution pointing to Pokemon S3 bucket
+        DefaultCacheBehavior: 
+          AllowedMethods:
+            - GET
+            - HEAD
+          Compress: true
+          ForwardedValues:
+            QueryString: true
+            Cookies:
+              Forward: none
+          TargetOriginId: PokemonOrigin
+          ViewerProtocolPolicy: allow-all
+        DefaultRootObject: index.html
+        Enabled: true
+        HttpVersion: 'http2'
+        Origins:
+        - DomainName: !Select [2, !Split ["/", !GetAtt PokemonBucket.WebsiteURL]]
+          Id: PokemonOrigin
+          CustomOriginConfig:
+            OriginProtocolPolicy: http-only
+        PriceClass: PriceClass_All
+        ViewerCertificate:
+          AcmCertificateArn: !Ref PokemonCertificate
+          SslSupportMethod: sni-only
+
+  PokemonRecordSet:
+    Type: AWS::Route53::RecordSetGroup
+    Properties:
+      HostedZoneId: !Ref DomainName
+      RecordSets: 
+        - Name: !Ref PokemonDomainName
+          Type: A
+          AliasTarget:
+            DNSName: !GetAtt PokemonCloudfront.DomainName
+            HostedZoneId: Z2FDTNDATAQYW2
+            
+Outputs:
+  BucketName: 
+    Description: S3 Bucket URL for Pokemon Website
+    Value: !GetAtt PokemonBucket.WebsiteURL
+  CloudfrontEndpoint:
+    Description: Endpoint for Pokemon Cloudfront
+    Value: !GetAtt PokemonCloudfront.DomainName
+  FullDomainName:
+    Description: Full Domain Name of my Application
+    Value: !Ref PokemonDomainName
